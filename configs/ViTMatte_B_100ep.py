@@ -17,7 +17,7 @@ lr_multiplier.scheduler.milestones=[int(43100 / 10 / 2 * 30), int(43100 / 10 / 2
 lr_multiplier.scheduler.num_updates = train.max_iter
 lr_multiplier.warmup_length = 250 / train.max_iter
 
-train.init_checkpoint = './pretrained/mae_vit_b_fna.pth'
+train.init_checkpoint = '/home/mannicui/ViTMatte/mae_pretrain_vit_base.pth'
 train.output_dir = './output_of_train/ViTMatte_B_100ep'
 
 dataloader.train.batch_size=10

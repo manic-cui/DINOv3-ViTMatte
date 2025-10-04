@@ -8,10 +8,10 @@ from data import ImageFileTrain, DataGenerator
 #Dataloader
 train_dataset = DataGenerator(
     data = ImageFileTrain(
-        alpha_dir='path/to/alpha',
-        fg_dir='path/to/fg',
-        bg_dir='path/to/bg',
-        root='path/to/Adobe_Image_Matting'
+        alpha_dir='/home/mannicui/ViTMatte/DIM_Dataset/alpha',
+        fg_dir='/home/mannicui/ViTMatte/DIM_Dataset/fg',
+        bg_dir='/home/mannicui/ViTMatte/train2014',
+        root='/home/mannicui/ViTMatte/DIM_Dataset'
     ),
     phase = 'train'
 )

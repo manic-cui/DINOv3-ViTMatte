@@ -299,7 +299,7 @@ class RandomAffine(object):
             shear = 0.0
 
         if flip is not None:
-            flip = (np.random.rand(2) < flip).astype(np.int) * 2 - 1
+            flip = (np.random.rand(2) < flip).astype(int) * 2 - 1
 
         return angle, translations, scale, shear, flip
 
@@ -507,15 +507,15 @@ class GenMask(object):
         alpha = cv2.resize(alpha_ori, (640,640), interpolation=maybe_random_interp(cv2.INTER_NEAREST))
 
         ### generate trimap
-        fg_mask = (alpha + 1e-5).astype(np.int).astype(np.uint8)
-        bg_mask = (1 - alpha + 1e-5).astype(np.int).astype(np.uint8)
+        fg_mask = (alpha + 1e-5).astype(int).astype(np.uint8)
+        bg_mask = (1 - alpha + 1e-5).astype(int).astype(np.uint8)
         fg_mask = cv2.erode(fg_mask, self.erosion_kernels[np.random.randint(1, max_kernel_size)])
         bg_mask = cv2.erode(bg_mask, self.erosion_kernels[np.random.randint(1, max_kernel_size)])
 
         fg_width = np.random.randint(1, 30)
         bg_width = np.random.randint(1, 30)
-        fg_mask = (alpha + 1e-5).astype(np.int).astype(np.uint8)
-        bg_mask = (1 - alpha + 1e-5).astype(np.int).astype(np.uint8)
+        fg_mask = (alpha + 1e-5).astype(int).astype(np.uint8)
+        bg_mask = (1 - alpha + 1e-5).astype(int).astype(np.uint8)
         fg_mask = cv2.erode(fg_mask, self.erosion_kernels[fg_width])
         bg_mask = cv2.erode(bg_mask, self.erosion_kernels[bg_width])
 
@@ -530,7 +530,7 @@ class GenMask(object):
         low = 0.01
         high = 1.0
         thres = random.random() * (high - low) + low
-        seg_mask = (alpha >= thres).astype(np.int).astype(np.uint8)
+        seg_mask = (alpha >= thres).astype(int).astype(np.uint8)
         random_num = random.randint(0,3)
         if random_num == 0:
             seg_mask = cv2.erode(seg_mask, self.erosion_kernels[np.random.randint(1, max_kernel_size)])

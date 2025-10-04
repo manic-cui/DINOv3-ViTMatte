@@ -1,3 +1,6 @@
+nohup python main.py --dist-url 'tcp://127.0.0.1:23456' \
+    --config-file configs/ViTMatte_S_100ep.py \
+    --num-gpus 2  > output10_9.log &
 ## Train
 
 ### Training Dataset
