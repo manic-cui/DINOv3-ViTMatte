@@ -1,10 +1,14 @@
-# vit.py
+# vit.py (已加入卷积颈功能)
 
 import logging
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from timm.models.layers import DropPath, Mlp, trunc_normal_
+import fvcore.nn.weight_init as weight_init
+
+# 从 detectron2 导入必要的模块
+from detectron2.layers import CNNBlockBase, Conv2d, get_norm
 
 from .backbone import Backbone
 from .utils import PatchEmbed, get_abs_pos, window_partition, window_unpartition
@@ -20,12 +24,9 @@ def rope_rotate_half(x: torch.Tensor) -> torch.Tensor:
     return torch.cat([-x2, x1], dim=-1)
 
 def rope_apply(x: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor) -> torch.Tensor:
-    # Adjust dtype for RoPE application if needed
     x_dtype = x.dtype
     rope_dtype = sin.dtype
     x = x.to(dtype=rope_dtype)
-    
-    # Apply RoPE
     out = (x * cos) + (rope_rotate_half(x) * sin)
     return out.to(dtype=x_dtype)
 
@@ -39,10 +40,76 @@ class LayerScale(nn.Module):
     def forward(self, x):
         return x.mul_(self.gamma) if self.inplace else x * self.gamma
 
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# +++ START: 从原始 ViTMatte 添加回来的卷积颈 (Convolution Neck) 模块 +++
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+class ResBottleneckBlock(CNNBlockBase):
+    """
+    标准的 bottleneck 残差模块，不包含最后的激活层。
+    包含三个卷积层，核大小分别为 1x1, 3x3, 1x1。
+    """
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        bottleneck_channels,
+        norm="LN",
+        act_layer=nn.GELU,
+    ):
+        """
+        Args:
+            in_channels (int): 输入通道数。
+            out_channels (int): 输出通道数。
+            bottleneck_channels (int): "瓶颈" 3x3 卷积层的输出通道数。
+            norm (str or callable): 所有卷积层的归一化方法。
+            act_layer (callable): 所有卷积层的激活函数。
+        """
+        super().__init__(in_channels, out_channels, 1)
+
+        self.conv1 = Conv2d(in_channels, bottleneck_channels, 1, bias=False)
+        self.norm1 = get_norm(norm, bottleneck_channels)
+        self.act1 = act_layer()
+
+        self.conv2 = Conv2d(
+            bottleneck_channels,
+            bottleneck_channels,
+            3,
+            padding=1,
+            bias=False,
+        )
+        self.norm2 = get_norm(norm, bottleneck_channels)
+        self.act2 = act_layer()
+
+        self.conv3 = Conv2d(bottleneck_channels, out_channels, 1, bias=False)
+        self.norm3 = get_norm(norm, out_channels)
+
+        for layer in [self.conv1, self.conv2, self.conv3]:
+            weight_init.c2_msra_fill(layer)
+        for layer in [self.norm1, self.norm2]:
+            layer.weight.data.fill_(1.0)
+            layer.bias.data.zero_()
+        # 最后一个 norm 层零初始化
+        self.norm3.weight.data.zero_()
+        self.norm3.bias.data.zero_()
+
+    def forward(self, x):
+        out = x
+        for layer in self.children():
+            out = layer(out)
+
+        out = x + out
+        return out
+
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# +++ END: 从原始 ViTMatte 添加回来的卷积颈 (Convolution Neck) 模块 +++
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
 
 class Attention(nn.Module):
     """
-    DINOv3 SelfAttention block adapted to ViTMatte's API, with RoPE integrated.
+    DINOv3 的自注意力模块，适配了 ViTMatte 的 API，并集成了 RoPE。
     """
     def __init__(
         self,
@@ -64,11 +131,11 @@ class Attention(nn.Module):
         self.use_rel_pos = use_rel_pos
         if self.use_rel_pos:
             self.rope = RopePositionEmbedding(
-                embed_dim=self.head_dim, # DINOv3 RoPE is per head
+                embed_dim=self.head_dim,
                 num_heads=self.num_heads,
                 base=100.0,
                 normalize_coords="separate",
-                dtype=torch.float32, # Use float32 for stability
+                dtype=torch.float32,
             )
 
     def forward(self, x: torch.Tensor):
@@ -94,7 +161,7 @@ class Attention(nn.Module):
 
 
 class Block(nn.Module):
-    """Transformer blocks with LayerScale and DINOv3-style RoPE attention"""
+    """带有 LayerScale 和 DINOv3 风格 RoPE 注意力的 Transformer 模块"""
 
     def __init__(
         self,
@@ -108,9 +175,9 @@ class Block(nn.Module):
         use_rel_pos=False,
         window_size=0,
         input_size=None,
-        # DINOv3-specific
         layerscale_init=1e-5,
-        **kwargs, # absorb other unused args
+        use_residual_block=False, # <--- 添加回来的参数
+        **kwargs,
     ):
         super().__init__()
         self.norm1 = norm_layer(dim)
@@ -121,7 +188,6 @@ class Block(nn.Module):
             use_rel_pos=use_rel_pos,
             input_size=input_size if window_size == 0 else (window_size, window_size),
         )
-        # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.ls1 = LayerScale(dim, init_values=layerscale_init) if layerscale_init else nn.Identity()
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         
@@ -132,11 +198,21 @@ class Block(nn.Module):
 
         self.window_size = window_size
 
+        # +++ 添加回来的卷积颈实例化逻辑 +++
+        self.use_residual_block = use_residual_block
+        if use_residual_block:
+            self.residual = ResBottleneckBlock(
+                in_channels=dim,
+                out_channels=dim,
+                bottleneck_channels=dim // 2,
+                norm="LN",
+                act_layer=act_layer,
+            )
+
     def forward(self, x):
         shortcut = x
         x_norm = self.norm1(x)
         
-        # Window logic from ViTMatte
         if self.window_size > 0:
             H, W = x.shape[1], x.shape[2]
             x_norm, pad_hw = window_partition(x_norm, self.window_size)
@@ -149,12 +225,18 @@ class Block(nn.Module):
         x = shortcut + self.drop_path(self.ls1(attn_out))
         x = x + self.drop_path(self.ls2(self.mlp(self.norm2(x))))
 
+        # +++ 添加回来的卷积颈前向传播逻辑 +++
+        if self.use_residual_block:
+            # permute 从 (B, H, W, C) -> (B, C, H, W) 以适配卷积层
+            # 然后再 permute 回来
+            x = self.residual(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+
         return x
 
 
 class ViT(Backbone):
     """
-    This module implements a Vision Transformer backbone compatible with DINOv3 weights.
+    实现了与 DINOv3 权重兼容的 Vision Transformer 骨干网络。
     """
     def __init__(
         self,
@@ -169,20 +251,17 @@ class ViT(Backbone):
         drop_path_rate=0.0,
         norm_layer=nn.LayerNorm,
         act_layer=nn.GELU,
-        use_abs_pos=True,
         use_rel_pos=False,
         window_size=0,
         window_block_indexes=(),
+        residual_block_indexes=(), # <--- 添加回来的参数
         use_act_checkpoint=False,
-        pretrain_img_size=224,
-        pretrain_use_cls_token=True,
         out_feature="last_feat",
-        # DINOv3-specific
         layerscale_init=1e-5,
         **kwargs,
     ):
         super().__init__()
-        self.pretrain_use_cls_token = pretrain_use_cls_token
+        # self.pretrain_use_cls_token = pretrain_use_cls_token
 
         self.patch_embed = PatchEmbed(
             kernel_size=(patch_size, patch_size),
@@ -191,12 +270,13 @@ class ViT(Backbone):
             embed_dim=embed_dim,
         )
 
-        if use_abs_pos:
-            num_patches = (pretrain_img_size // patch_size) * (pretrain_img_size // patch_size)
-            num_positions = (num_patches + 1) if pretrain_use_cls_token else num_patches
-            self.pos_embed = nn.Parameter(torch.zeros(1, num_positions, embed_dim))
-        else:
-            self.pos_embed = None
+        # if use_abs_pos:
+        #     num_patches = (pretrain_img_size // patch_size) * (pretrain_img_size // patch_size)
+        #     num_positions = (num_patches + 1) if pretrain_use_cls_token else num_patches
+        #     self.pos_embed = nn.Parameter(torch.zeros(1, num_positions, embed_dim))
+        # else:
+        #     self.pos_embed = None
+        self.pos_embed = None
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
@@ -214,22 +294,18 @@ class ViT(Backbone):
                 window_size=window_size if i in window_block_indexes else 0,
                 input_size=(img_size // patch_size, img_size // patch_size),
                 layerscale_init=layerscale_init,
+                use_residual_block=i in residual_block_indexes, # <--- 将参数传递给 Block
             )
             if use_act_checkpoint:
-                # you may need to import checkpoint_wrapper from fairscale
                 from fairscale.nn.checkpoint import checkpoint_wrapper
                 block = checkpoint_wrapper(block)
             self.blocks.append(block)
         
-        # Add the final norm layer
         self.norm = norm_layer(embed_dim)
 
         self._out_feature_channels = {out_feature: embed_dim}
         self._out_feature_strides = {out_feature: patch_size}
         self._out_features = [out_feature]
-
-        if self.pos_embed is not None:
-            trunc_normal_(self.pos_embed, std=0.02)
 
         self.apply(self._init_weights)
 
@@ -243,21 +319,16 @@ class ViT(Backbone):
             nn.init.constant_(m.weight, 1.0)
 
     def load_state_dict(self, state_dict, strict=True):
-        # ViTMatte needs a custom loader to handle weights that don't match
-        # This is especially true when loading DINOv3 weights.
+        # 使用非严格模式加载，以忽略卷积颈的权重（因为预训练模型中没有）
         super().load_state_dict(state_dict, strict=False)
 
     def forward(self, x):
         x = self.patch_embed(x)
-        if self.pos_embed is not None:
-            x = x + get_abs_pos(
-                self.pos_embed, self.pretrain_use_cls_token, (x.shape[1], x.shape[2])
-            )
+
 
         for blk in self.blocks:
             x = blk(x)
 
-        # Apply the final norm layer before output
         x = self.norm(x)
         
         outputs = {self._out_features[0]: x.permute(0, 3, 1, 2)}

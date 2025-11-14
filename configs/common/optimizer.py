@@ -20,7 +20,7 @@ def get_vit_lr_decay_rate(name, lr_decay_rate=1.0, num_layers=12, head_lr_mult=1
         elif ".blocks." in name and ".residual." not in name:
             layer_id = int(name[name.find(".blocks.") :].split(".")[2]) + 1
         return lr_decay_rate ** (num_layers + 1 - layer_id)
-    elif name.startswith("decoder"):
+    if name.startswith("decoder"):
         return head_lr_mult
     
     # 对于其他参数（如果有的话），返回默认乘子1.0
@@ -30,6 +30,6 @@ def get_vit_lr_decay_rate(name, lr_decay_rate=1.0, num_layers=12, head_lr_mult=1
 optimizer = model_zoo.get_config("common/optim.py").AdamW
 
 
-optimizer.params.lr_factor_func = partial(get_vit_lr_decay_rate, num_layers=12, lr_decay_rate=0.65, head_lr_mult=5)
+optimizer.params.lr_factor_func = partial(get_vit_lr_decay_rate, num_layers=12, lr_decay_rate=0.65, head_lr_mult=3)
 
 optimizer.params.overrides = {"pos_embed": {"weight_decay": 0.0}}

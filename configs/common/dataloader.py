@@ -8,10 +8,10 @@ from data import ImageFileTrain, DataGenerator
 #Dataloader
 train_dataset = DataGenerator(
     data = ImageFileTrain(
-        alpha_dir='/home/mannicui/ViTMatte/DIM_Dataset/alpha',
-        fg_dir='/home/mannicui/ViTMatte/DIM_Dataset/fg',
-        bg_dir='/home/mannicui/ViTMatte/train2014',
-        root='/home/mannicui/ViTMatte/DIM_Dataset'
+        alpha_dir='/data/cuimanni/vitmatte_result/DIM_Dataset/alpha',
+        fg_dir='/data/cuimanni/vitmatte_result/DIM_Dataset/fg',
+        bg_dir='/data/cuimanni/vitmatte_result/train2014',
+        root='/data/cuimanni/vitmatte_result/DIM_Dataset'
     ),
     phase = 'train'
 )

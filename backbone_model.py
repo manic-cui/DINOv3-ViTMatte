@@ -75,7 +75,7 @@ def main():
         dinov3_backbone.eval()
 
         # 加载您之前预处理好的 DINOv3 权重
-        dinov3_weights_path = './dinov3_vit_s_fna.pth'
+        dinov3_weights_path = '/data/cuimanni/vitmatte_result/output_of_train/dinov3_vit_s_fna.pth'
         if not os.path.exists(dinov3_weights_path):
              raise FileNotFoundError(f"找不到 DINOv3 权重文件: {dinov3_weights_path}。请先运行 preprocess_dinov3.py。")
 

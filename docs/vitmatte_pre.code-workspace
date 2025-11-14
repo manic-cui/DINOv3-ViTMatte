@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "../../vitmatte_pre"
+		},
+		{
+			"path": ".."
+		}
+	],
+	"settings": {
+		"git.ignoreLimitWarning": true
+	}
+}

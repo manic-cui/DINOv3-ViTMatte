@@ -1,6 +1,8 @@
-nohup python main.py --dist-url 'tcp://127.0.0.1:23456' \
-    --config-file configs/ViTMatte_S_100ep.py \
-    --num-gpus 2  > output10_9.log &
+nohup python main.py --config-file configs/ViTMatte_S_100ep.py \
+    --num-gpus 2 > /data/cuimanni/vitmatte_result/output/output100_1.log &
+
+nohup env CUDA_VISIBLE_DEVICES=2,3 python main.py --config-file configs/ViTMatte_S_10ep.py \
+    --num-gpus 2 > /data/cuimanni/vitmatte_result/output/output10_new_1.log &
 ## Train
 
 ### Training Dataset
